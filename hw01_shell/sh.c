@@ -65,7 +65,7 @@ runcmd(struct cmd *cmd)
     execv(ecmd->argv[0], ecmd->argv);
    
     // find in PATH 
-    const char * path = "/bin:/sbin:/user/sbin";
+    const char * path = "/bin:/sbin:/usr/bin";
     int pathLength = strlen(path);
     char * destPath = malloc(sizeof(ecmd->argv[0]) + pathLength * sizeof(char));
     int op = 0;
@@ -84,24 +84,57 @@ runcmd(struct cmd *cmd)
     }
 
     // print error
-    fprintf(stderr, "exec %s failed\n", ecmd->argv[0]);
+    fprintf(stderr, "ERROR: command not found : \"%s\"\n", ecmd->argv[0]);
     // My exec code end
     break;
 
   case '>':
   case '<':
     rcmd = (struct redircmd*)cmd;
-    fprintf(stderr, "redir not implemented\n");
-    // Your code here ...
+
+    // My redir code start
+    // close file description 
+    close(rcmd->fd);
+    // open redir file
+    if (rcmd->fd == 1) {
+      if(creat(rcmd->file, 00664) < 0) {
+        fprintf(stderr, "ERROR: create file failed: %s\n", rcmd->file);
+        exit(0);
+      }
+    }
+    
+    if (open(rcmd->file, rcmd->mode) < 0) {
+      fprintf(stderr, "ERROR: open file failed: %s\n", rcmd->file);
+      exit(0);
+    }
     runcmd(rcmd->cmd);
+    // My redir code end
+
     break;
 
   case '|':
     pcmd = (struct pipecmd*)cmd;
-    fprintf(stderr, "pipe not implemented\n");
+    
+    // My pipe code start
+    pipe(p);
+    if (fork1() == 0) {
+      close(0);
+      dup(p[0]);
+      close(p[0]);
+      close(p[1]);
+      runcmd(pcmd->right);
+    } else {
+      close(1);
+      dup(p[1]);
+      close(p[0]);
+      close(p[1]);
+      runcmd(pcmd->left);
+    }
+    //close(pcmd->left);
+    // My pipe code end
     // Your code here ...
     break;
-  }    
+  } 
   exit(0);
 }
 
@@ -134,7 +167,7 @@ main(void)
         fprintf(stderr, "cannot cd %s\n", buf+3);
       continue;
     }
-    if(strncmp(buf, "exit ", 5)) {
+    if(strncmp(buf, "exit", 4) == 0) {
       fprintf(stdout, "Exit, good bye.\n");
       exit(0);
     }
@@ -216,6 +249,10 @@ gettoken(char **ps, char *es, char **q, char **eq)
   case 0:
     break;
   case '|':
+  case '(':
+  case ')':
+  case ';':
+  case '&':
   case '<':
     s++;
     break;
@@ -287,6 +324,14 @@ parseline(char **ps, char *es)
 {
   struct cmd *cmd;
   cmd = parsepipe(ps, es);
+  while(peek(ps, es, "&")){
+    gettoken(ps, es, 0, 0);
+    cmd = backcmd(cmd);
+  }
+  if(peek(ps, es, ";")){
+    gettoken(ps, es, 0, 0);
+    cmd = listcmd(cmd, parseline(ps, es));
+  }
   return cmd;
 }
 
